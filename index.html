@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Generation</title>
+  </head>
+  <body>
+    <h1>Music Generation</h1>
+    <form>
+      <label for="model">Model</label>
+      <select id="model" name="model">
+        <option value="rnn">RNN</option>
+        <option value="cnn">CNN</option>
+        <option value="transformer">Transformer</option>
+        <option value="vae" selected>VAE</option>
+        <option value="gan">GAN</option>
+      </select>
+      <label for="length">Length</label>
+      <input type="text" id="length" name="length" value="600" />
+      <label for="prefix">Prefix</label>
+      <input type="text" id="prefix" name="prefix" value="1" />
+      <button type="submit" id="generate">Generate</button>
+    </form>
+    <div>
+      <p id="status">Model: enum. Length: number. Prefix: numbers separated by comma.</p>
+      <a href="#" id="download">Download</a>
+      <div>
+        <midi-player src="data:," id="midi" sound-font visualizer="#myVisualizer"></midi-player>
+        <midi-visualizer type="piano-roll" id="myVisualizer"></midi-visualizer>
+      </div>
+    </div>
+    <script src="script.js"></script>
+    <script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/focus-visible@5,npm/html-midi-player@1.4.0"></script>
+  </body>
+</html>
