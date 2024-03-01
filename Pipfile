@@ -8,6 +8,8 @@ fastapi = "*"
 uvicorn = "*"
 torch = "*"
 pretty-midi = "*"
+streamlit = "*"
+midi-player = "*"
 
 [dev-packages]
 
