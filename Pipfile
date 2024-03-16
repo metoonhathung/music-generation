@@ -8,6 +8,7 @@ fastapi = "*"
 uvicorn = "*"
 torch = "*"
 pretty-midi = "*"
+python-dotenv = "*"
 streamlit = "*"
 midi-player = "*"
 

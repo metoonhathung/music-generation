@@ -1,3 +1,4 @@
 --find-links https://download.pytorch.org/whl/torch_stable.html
 torch==1.12.1+cpu
 pretty-midi==0.2.9
+python-dotenv==1.0.1

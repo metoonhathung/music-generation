@@ -1,4 +1,5 @@
 dataset/
 checkpoint/
 output/
+**/.env
 .DS_Store

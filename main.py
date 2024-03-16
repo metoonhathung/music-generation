@@ -2,13 +2,18 @@ import streamlit as st
 import requests
 import tempfile
 from midi_player import MIDIPlayer
+from dotenv import load_dotenv, find_dotenv
+import os
+
+_ = load_dotenv(find_dotenv())
 
 def get_midi_from_api(model, length, prefix):
     # url = "http://localhost/generate"
-    url = "https://music-generation-24psxym5la-uc.a.run.app/generate"
+    url = "https://metoonhathung-music-generation-api-24psxym5la-uc.a.run.app/generate"
     headers = {
         "Content-Type": "application/json",
-        "Accept": "audio/midi"
+        "Accept": "audio/midi",
+        "X-API-Key": os.environ["API_KEY"]
     }
     data = {
         "model": model,
