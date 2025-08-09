@@ -3,16 +3,22 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 name = "pypi"
 
+[[source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+verify_ssl = true
+
 [packages]
 fastapi = "*"
 uvicorn = "*"
-torch = "*"
+torch = { version = "*", index = "pytorch-cpu" }
+transformers = "*"
 pretty-midi = "*"
 python-dotenv = "*"
-streamlit = "*"
+streamlit = "==1.32.2"
 midi-player = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.10"
+python_version = "3.11"
