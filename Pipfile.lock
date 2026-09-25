@@ -262,6 +262,14 @@
             "markers": "python_version >= '3.6'",
             "version": "==3.10"
         },
+        "importlib-resources": {
+            "hashes": [
+                "sha256:0722d4c6212489c530f2a145a34c0a7a3b4721bc96a15fada5930e2a0b760708",
+                "sha256:1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1"
+            ],
+            "markers": "python_version >= '3.10'",
+            "version": "==7.1.0"
+        },
         "jinja2": {
             "hashes": [
                 "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d",
@@ -594,10 +602,11 @@
         },
         "pretty-midi": {
             "hashes": [
-                "sha256:ea6e192f94044674e833336ea1f415318ddf28e320302ac7b109edff0d4534bd"
+                "sha256:a3e2321736245a9c92259716d85a4762f16b7bde2f591fb0dba95bdb6e793d8a",
+                "sha256:c91e40c9b087b0511f503c3efbba892b41e7048c831cafdccbf6ba965632a0bf"
             ],
             "index": "pypi",
-            "version": "==0.2.10"
+            "version": "==0.2.11.post0"
         },
         "protobuf": {
             "hashes": [

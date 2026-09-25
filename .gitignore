@@ -1,5 +1,26 @@
+# Data, models and generated music (models are hosted on Hugging Face)
 dataset/
 checkpoint/
 output/
+
+# Secrets (the .env.example templates stay tracked)
 **/.env
+
+# Python, Jupyter, editor and OS clutter
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.cache/
 .DS_Store
+
+# Downloaded at runtime by the notebooks
+midi_neural_processor.py
+/processor.py
+
+# Created by huggingface_transformers.ipynb when run locally
+/data_train.txt
+/data_valid.txt
+/music-generation/
+/trained_model/
+/runs/
+/output.midi

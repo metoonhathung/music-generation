@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.util import load_rnn, load_cnn, load_transformer, load_vae, load_gan, generate_buffer, GenerateRequest
+from app.util import load_rnn, load_cnn, load_trf, load_vae, load_gan, load_a2c, load_gpt2, generate_buffer, GenerateRequest
 from dotenv import load_dotenv, find_dotenv
 import os
 
@@ -36,9 +36,11 @@ async def startup():
     model_dict = {
         "rnn": load_rnn(),
         "cnn": load_cnn(),
-        "transformer": load_transformer(),
+        "trf": load_trf(),
         "vae": load_vae(),
-        "gan": load_gan()
+        "gan": load_gan(),
+        "a2c": load_a2c(),
+        "gpt2": load_gpt2()
     }
 
 @app.get("/")

@@ -5,26 +5,42 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Music Generation</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; line-height: 1.5; }
+      h1 { font-size: 1.6rem; margin-bottom: 24px; }
+      form { display: grid; grid-template-columns: max-content 1fr; gap: 10px 14px; align-items: center; }
+      label { font-weight: 600; font-size: 0.9rem; }
+      input, select { padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+      button { grid-column: 1 / -1; padding: 10px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+      button:disabled { background: #93a8d8; cursor: wait; }
+      #status { color: #555; font-size: 0.9rem; margin: 20px 0 8px; }
+      #download { display: inline-block; margin-bottom: 12px; }
+      midi-player, midi-visualizer { display: block; width: 100%; }
+    </style>
   </head>
   <body>
     <h1>Music Generation</h1>
     <form>
       <label for="model">Model</label>
       <select id="model" name="model">
+        <option value="gpt2">GPT2</option>
         <option value="rnn">RNN</option>
         <option value="cnn">CNN</option>
-        <option value="transformer">Transformer</option>
-        <option value="vae" selected>VAE</option>
+        <option value="trf">TRF</option>
+        <option value="vae">VAE</option>
         <option value="gan">GAN</option>
+        <option value="a2c">A2C</option>
       </select>
       <label for="length">Length</label>
       <input type="text" id="length" name="length" value="600" />
       <label for="prefix">Prefix</label>
       <input type="text" id="prefix" name="prefix" value="1" />
+      <label for="apikey">API key</label>
+      <input type="password" id="apikey" name="apikey" />
       <button type="submit" id="generate">Generate</button>
     </form>
     <div>
-      <p id="status">Model: enum. Length: number. Prefix: numbers separated by comma.</p>
+      <p id="status">Length: MIDI events to generate, prefix included (about 45 per second; TRF and GAN: 2048 max). Prefix: event IDs separated by commas, 1 = start of a piece.</p>
       <a href="#" id="download">Download</a>
       <div>
         <midi-player src="data:," id="midi" sound-font visualizer="#myVisualizer"></midi-player>
