@@ -1,6 +1,6 @@
 # Music Generation — Project Report
 
-A from-scratch deep-learning project: seven different model families, each trained to compose
+A from-scratch deep-learning project: eight different model families, each trained to compose
 ragtime piano music as a sequence of MIDI events. The point is learning — how each architecture
 works, how it trains, and where it breaks — rather than chasing a single best model.
 
@@ -12,7 +12,8 @@ For installing, running the app and deployment, see [README.md](README.md).
 
 Train and compare sequence models that **generate new piano music**, and serve them behind an API
 and a web demo. Each model reads a sequence of musical events and learns to predict what comes next;
-at generation time it writes a piece one event at a time.
+at generation time it writes a piece one event at a time. The exception is the diffusion model (§5.8),
+which fills in hidden events anywhere in the piece and generates all of them over a series of steps.
 
 ## 2. Data
 
@@ -30,7 +31,7 @@ There is **no held-out test set**: all models train and evaluate on the same pie
 
 ## 3. Setup
 
-- **Framework:** PyTorch, in `music_generation.ipynb` (six models) and
+- **Framework:** PyTorch, in `music_generation.ipynb` (seven models) and
   `huggingface_transformers.ipynb` (GPT-2). Trained on Google Colab GPUs and Apple Silicon (MPS).
 - **Shared helpers:** `train_net` (Adam, gradient clipping, optional AMP/scheduler),
   `evaluate_net`, `generate_output` (tokens → `.midi`), `save_checkpoint` / `load_checkpoint`.
@@ -44,150 +45,237 @@ There is **no held-out test set**: all models train and evaluate on the same pie
 | `evaluate_net` accuracy | Feeds 60 real events, then lets the model continue greedily, and scores position by position | Scored on training data; ~10 points are free (the 59 primer events count as correct); once a continuation diverges from the original piece, matches drop to chance. A random network scores ≈11%, a good one ≈16–17%. |
 | Teacher-forced accuracy | How often the model's top guess for the next event is right, given the real history | Measured on training pieces **and** on transposed copies the model never saw — the gap reveals memorization |
 | Free-running statistics | Pitch/timing distributions, notes per second, note-on/off pairing, note durations, **notes sounding at once** | Real ragtime: ~12 notes/s, median note 0.21 s, ~3 notes sounding at once |
+| Inference time | Seconds to generate one 600-event piece on CPU, as both apps run | Measured on an Apple M5 Pro (6 threads); hosted CPUs are slower, but the ranking holds |
 
 ---
 
-## 5. The seven models
+## 5. The eight models
+
+### Families
+
+Each model falls into one family by **how it learns to generate**. Separately, each is built from one
+of three kinds of network: **recurrent** (GRU), **convolutional** or **attention** (Transformer).
+
+| Family | How it learns to generate | Models |
+|---|---|---|
+| Autoregressive | Predicts the next event from the ones before it, and writes left to right | RNN, CNN, Transformer, GPT-2 |
+| Latent-variable | Compresses a piece into a code and learns to rebuild it; new codes give new pieces | VAE |
+| Adversarial | A generator learns to fool a discriminator that tells real pieces from generated ones | GAN |
+| Reinforcement learning | A policy learns from a reward for every event it writes | A2C |
+| Diffusion | Hides part of a piece and learns to fill it in; generates starting from a fully hidden piece | Diffusion |
 
 ### Summary
 
-| Model | Params | Training | `evaluate_net` | Teacher-forced acc (seen → unseen) |
+| Model | Family | Network | Starts from | Params | Training | `evaluate_net` | Accuracy (seen → unseen) |
+|---|---|---|---|---|---|---|---|
+| RNN | Autoregressive | GRU | scratch | 4.6 M | 50 epochs, 4.1 h | 24.1% | 96.4% → 65.2% |
+| CNN | Autoregressive | Dilated convolutions | scratch | 15.1 M | 50 epochs, 2.1 h | 18.1% | 86.8% → 61.5% |
+| Transformer | Autoregressive | Transformer decoder | scratch | 3.4 M | 50 epochs, 55 min | 17.3% | 80.1% → 72.7% |
+| GPT-2 | Autoregressive | Transformer decoder (Hugging Face) | scratch | 86.3 M | 20 epochs on Colab | — | — |
+| VAE | Latent-variable | GRU encoder + decoder | scratch | 16.8 M | 50 epochs, 3.2 h | 23.1% | 96.2% on seen |
+| GAN | Adversarial | 2 × Transformer decoder | **trained Transformer** | 3.4 M + 3.4 M | 600 iterations, 35 min | 16.8% | 79.7% on seen |
+| A2C | Reinforcement learning | GRU | scratch | 4.6 M | 30 epochs, 67 min | 17.2% | ~75% on seen |
+| Diffusion | Diffusion | Bidirectional Transformer | scratch | 17.0 M | 100 epochs, 3.9 h | 17.1% | 61.9% → 59–60%* |
+
+- **Only the GAN starts from trained weights:** both of its networks begin as the trained
+  Transformer. GPT-2 borrows only the architecture, and Diffusion reuses the Transformer's code but
+  not its weights.
+- **"Unseen"** means the same pieces transposed by a few semitones: the same style, but event
+  sequences the model never trained on.
+- **Accuracy** is teacher-forced next-event accuracy. \*Diffusion doesn't predict the next event, so
+  its number is hidden-event accuracy averaged over hiding 5–95% of a piece. It is not directly
+  comparable with the others.
+
+### Inference cost
+
+Time to generate one 600-event piece on CPU (Apple M5 Pro, 6 threads), which is how both apps run,
+most expensive first. Memory is the float32 weights the apps hold (4 bytes per parameter).
+
+| Rank | Model | Time per 600 events | Weights in memory | Why |
 |---|---|---|---|---|
-| RNN | 4.6 M | 50 epochs, 4.1 h | 24.1% | 96.4% → 65.2% |
-| CNN | 15.1 M | 50 epochs, 2.1 h | 18.1% | 86.8% → 61.5% |
-| VAE | 16.8 M | 50 epochs, 3.2 h | 23.1% | 96.2% on seen (behaves like the RNN) |
-| Transformer | 3.4 M | 50 epochs, 55 min | 17.3% | 80.1% → 72.7% |
-| GAN | 3.4 M + 3.4 M | 600 iterations fine-tuning, 35 min | 16.8% | 79.7% on seen |
-| A2C | 4.6 M | 30 epochs, 67 min | 17.2% | ~75% on seen (training log) |
-| GPT-2 | 86.3 M | 20 epochs on Colab | — | — |
+| 1 | Diffusion | 14.3 s | 68 MB | 400 full passes over the piece: 100 reveal steps + 300 correction rounds |
+| 2 | CNN | 9.0 s | 60 MB | Recomputes the whole convolution stack over the piece so far, for every new event |
+| 3 | Transformer | 6.9 s | 14 MB | Re-reads the whole piece so far for every new event (no key-value cache) |
+| 3 | GAN | 6.9 s | 14 MB | The Transformer's `predict`; the discriminator isn't used |
+| 5 | GPT-2 | ≈3–5 s (estimate) | 345 MB | The largest, but it caches keys and values, so each new token costs the same |
+| 6 | VAE | 0.13 s | 67 MB | A GRU decoder with a fixed-size state: the same work for every event |
+| 7 | RNN | 0.12 s | 18 MB | Same as the VAE |
+| 7 | A2C | 0.12 s | 18 MB | Same as the VAE |
 
-"Unseen" = the same pieces transposed by a few semitones: same style, but event sequences the model
-never trained on.
+- **Time and memory rank differently.** GPT-2 needs the most memory but is mid-table on time. The
+  three GRU models are over 50× faster than any convolution or attention model here.
+- **The GPT-2 figure is an estimate:** 1.5 s per 256-token chunk, measured on an untrained model of
+  the same size, times 2–3 chunks per piece. No GPT-2 weights were on disk.
+- **The order holds on the apps' hosts.** Streamlit Cloud and Cloud Run have slower CPUs, so every
+  time grows there.
 
-### 5.1 RNN — recurrent language model
+Every section below uses the same seven headings: family, inspiration, architecture, training,
+inference, result and takeaway.
 
-- **Inspired by:** GRU (Cho et al., 2014); character-level RNN language models; Magenta's
+### Autoregressive models
+
+#### 5.1 RNN — recurrent language model
+
+- **Family:** autoregressive · recurrent · trained from scratch.
+- **Inspired by:** GRU (Cho et al., 2014), character-level RNN language models and Magenta's
   **Performance RNN** (Simon & Oore, 2017), which uses this exact event representation.
-- **Architecture:** embedding (256) → 3-layer GRU (512) → linear layer over the 391 events.
-- **Training:** teacher-forced next-event cross-entropy, Adam at 1e-3, 50 epochs. Loss fell steadily
-  the whole run.
-- **Result:** the highest `evaluate_net` score (24.1%) and 96.4% teacher-forced accuracy — but on
-  transposed pieces it drops to 65.2%. **It largely memorized the 446 pieces**, which also inflates its
-  `evaluate_net` score (it can continue a known piece from memory). Its free-running output is
-  nonetheless clean: sampled raw it keeps ~4.6 notes sounding at once (real ~3), with only ~3% of its
-  output copied verbatim from the training set.
+- **Architecture:** an embedding (256), a 3-layer GRU (512) and a linear layer over the 391 events;
+  4.6 M parameters.
+- **Training:** teacher-forced next-event cross-entropy, Adam 1e-3, 50 epochs (4.1 h). The loss fell
+  steadily for the whole run.
+- **Inference:** 0.12 s per 600 events, among the cheapest: the GRU carries a fixed-size state, so
+  every new event costs the same.
+- **Result:** the top `evaluate_net` score (24.1%) and 96.4% seen accuracy, but 65.2% unseen: it
+  **largely memorized** the 446 pieces. Sampled raw, it stays clean (~4.6 notes at once, ~3% copied).
+- **Takeaway:** it is the best at continuing music it knows, not at inventing new music. A held-out
+  split would expose the difference.
 
-### 5.2 CNN — WaveNet
+#### 5.2 CNN — WaveNet
 
-- **Inspired by:** **WaveNet** (van den Oord et al., 2016).
-- **Architecture:** dilated causal 1-D convolutions (dilations 1…512, receptive field 1,025 events)
-  with gated tanh·sigmoid units, residual and skip connections, and two 1×1 output convolutions.
-- **Training:** same objective and optimizer as the RNN. The loss reached its lowest point around
-  iteration 4,000–5,000 and then **rose steadily** for the rest of training (5-log-line average 170 →
-  223). The saved checkpoint comes from that degraded end — most likely the constant 1e-3 learning
-  rate being too high late in training (no decay schedule is active).
-- **Result:** 86.8% → 61.5% teacher-forced (seen → unseen): it memorized too, and generalizes worst of
-  the likelihood-trained models. A learning-rate schedule or keeping the best checkpoint would likely
-  help most.
+- **Family:** autoregressive · convolutional · trained from scratch.
+- **Inspired by:** **WaveNet** (van den Oord et al., 2016): dilated causal convolutions with gated
+  units.
+- **Architecture:** dilated causal 1-D convolutions (dilations 1…512, receptive field 1,025 events),
+  gated tanh·sigmoid units, residual and skip connections, and two 1×1 output convolutions.
+- **Training:** as the RNN, 50 epochs (2.1 h). The loss bottomed out around iteration 4,000–5,000,
+  then **rose steadily** (170 → 223). The saved checkpoint comes from that degraded end.
+- **Inference:** 9.0 s per 600 events, the second most expensive: it recomputes the whole convolution
+  stack over the piece so far, for every new event.
+- **Result:** 86.8% seen → 61.5% unseen: it memorized too, and generalizes worst of the models trained
+  on likelihood. The likely cause is the constant 1e-3 learning rate, which never decays.
+- **Takeaway:** a learning-rate schedule, or keeping the best checkpoint rather than the last, would
+  likely help most.
 
-### 5.3 VAE — recurrent variational autoencoder
+#### 5.3 Transformer — decoder-only self-attention
 
-- **Inspired by:** VAE (Kingma & Welling, 2014), the sentence VAE (Bowman et al., 2016) and Magenta's
-  **MusicVAE** (Roberts et al., 2018).
-- **Architecture:** a bidirectional 3-layer GRU encoder compresses a segment into a 64-d latent `z`;
-  a 3-layer GRU decoder regenerates the segment with `z` fed in at every step. Loss = reconstruction +
-  KL divergence (the ELBO).
-- **Training:** 50 epochs; loss fell steadily.
-- **Result:** the code is correct, but the latent **collapsed**: the KL term is only 1.07 nats per
-  piece across 64 dimensions, and the decoder scores the same with its own `z` as with `z = 0`. This is
-  the classic failure of VAEs with strong autoregressive decoders (Bowman et al.): the decoder ignores
-  the latent. So the VAE works as a second RNN (same 96% seen accuracy, same memorization) — sampling
-  different `z` values does not change the music. KL annealing or word dropout are the standard fixes.
-
-### 5.4 Transformer — decoder-only self-attention
-
+- **Family:** autoregressive · attention · trained from scratch.
 - **Inspired by:** "Attention Is All You Need" (Vaswani et al., 2017), decoder-only as in GPT, and
-  **Music Transformer** (Huang et al., 2018), which introduced this event vocabulary (Music Transformer
-  uses relative attention; this one uses sinusoidal absolute positions).
+  **Music Transformer** (Huang et al., 2018), which introduced this event vocabulary.
 - **Architecture:** 6 layers, d_model 256, 8 heads, feed-forward 512, post-LayerNorm, tied
-  input/output embeddings, causal mask, fused attention (`scaled_dot_product_attention`).
-- **Training:** 50 epochs, AdamW 3e-4 with warmup and linear decay, label smoothing 0.1, mixed
-  precision. Loss 10.4 → 1.6.
-- **Result:** lower seen accuracy (80.1%) than the RNN but **the best generalization** (72.7% on
-  unseen pieces) — it learned music rather than memorizing pieces. With its default decoding (top-40,
-  temperature 0.95) it **sounds good, comparable to the GAN**. Its one weakness appears only when
-  sampling raw, without top-40: **label smoothing trains it to keep ~6% of its probability on
-  unlikely events**, so stray note-ons accumulate (~16 notes sounding at once vs ~3 in real music).
-  Top-40 filters those out, which is why the default output sounds right. This finding shaped the GAN
-  work below.
+  embeddings, causal mask, sinusoidal positions; 3.4 M parameters.
+- **Training:** AdamW 3e-4 with warmup and linear decay, label smoothing 0.1, mixed precision,
+  50 epochs (55 min). Loss 10.4 → 1.6.
+- **Inference:** 6.9 s per 600 events: `predict` re-reads the whole piece so far for every new event
+  (no key-value cache), so its cost grows with the square of the length.
+- **Result:** **the best generalization** (80.1% seen → 72.7% unseen), and it sounds good with top-40
+  sampling. Sampled raw, label smoothing leaves ~6% of its probability on unlikely events.
+- **Takeaway:** this is the reference model. Its weights seed the GAN, and its code is reused by the
+  diffusion model.
 
-### 5.5 GAN — Transformer generator + Transformer discriminator
+#### 5.4 GPT-2 — Hugging Face causal language model
 
-- **Inspired by:** GAN (Goodfellow et al., 2014); **SeqGAN** (Yu et al., 2017) for MLE pretraining plus
-  policy-gradient training of a token generator; **ScratchGAN** (de Masson d'Autume et al., 2019) for
-  dense per-event rewards; **LeakGAN** (Guo et al., 2018) for interleaving MLE during adversarial
-  training; **Transformer-GAN for symbolic music** (Muhamed et al., 2021) for a pretrained
-  discriminator.
-- **Architecture:** both networks start from the trained Transformer.
-  - *Generator:* writes 600-event pieces with a key-value cache, so a rollout costs linear rather than
-    quadratic time.
-  - *Discriminator:* the Transformer body with a one-number head that scores every event as real or
-    generated.
-- **Training:** 600 iterations. Each one runs a discriminator step, a REINFORCE generator step on
-  discounted per-event rewards `2·σ(D) − 1` with a moving-average baseline, and a plain cross-entropy
-  MLE step on real data. The discriminator learns 10× slower (1e-5 vs 1e-4) after a 10-step warm-up;
-  at equal speed it won within 50 steps and gave no usable signal.
-- **How it got here:** earlier attempts at a *pure* GAN (no MLE) failed — the discrete-token gradient
-  problem, a start-token leak that let the discriminator win by reading position 0, and an entropy
-  bonus that pushed outputs toward noise. The working version is a pretrained hybrid, as in the
-  published work.
-- **Result** (raw sampling, compared with plain MLE fine-tuning of the same length):
-
-  | | notes sounding at once | variety (distinct 4-grams) | accuracy |
-  |---|---|---|---|
-  | real music | ~2.9–3.0 | 0.72–0.74 | — |
-  | Transformer, raw | 15.9 | 0.80 | 79.9% |
-  | plain-CE fine-tune (control) | 4.9–5.0 | 0.75–0.77 | 79.9% |
-  | **GAN** | **3.8–4.2** | **0.70–0.74** | 79.7% |
-
-  Dropping label smoothing (the plain-CE MLE step) fixes most of the raw-sampling problem on its own.
-  **The GAN's own contribution** is about 20% fewer stuck notes than that control — half the remaining
-  gap to real music — and more realistic variety, with nothing else harmed (single training run; two
-  sampling seeds). On stuck notes, its raw output even measures slightly cleaner than the original
-  Transformer's top-40 output (5.1); by ear, the two sound comparable.
-
-### 5.6 A2C — advantage actor-critic
-
-- **Inspired by:** **A3C / A2C** (Mnih et al., 2016).
-- **Architecture:** a 3-layer GRU shared by an *actor* (policy over the 391 events) and a *critic*
-  (value estimate).
-- **Training:** pure reinforcement learning from random initialization — no MLE anywhere. The actor
-  samples an event and receives reward 1 only if it matches the real next event. The GRU state is
-  teacher-forced, so each step is a contextual bandit (γ = 0) and the critic acts as a per-state
-  baseline. Entropy bonus 0.05 keeps the policy from collapsing (0.01 collapsed; 0.2 gave noise).
-- **Result:** next-event accuracy climbed from 0.5% to ~75% in 30 epochs purely from reward, and
-  `evaluate_net` reached 17.2% — on par with the Transformer. It shows that RL with a sparse
-  right/wrong reward can learn a language model, though less efficiently than MLE.
-- **A2C vs the GAN:** both use policy gradients with a second network, but A2C's critic only
-  *predicts* the reward of a fixed rule (teammates), while the GAN's discriminator *is* the reward and
-  competes with the generator (opponents). A2C always trains on real history; the GAN trains on its
-  own samples, which is why it can fix habits that only appear when the model writes by itself.
-
-### 5.7 GPT-2 — Hugging Face causal language model
-
+- **Family:** autoregressive · attention · trained from scratch (only the architecture is borrowed).
 - **Inspired by:** **GPT-2** (Radford et al., 2019), following the Hugging Face course chapter
   "Training a causal language model from scratch".
-- **Architecture:** Hugging Face `GPT2LMHeadModel` — 12 layers, 768-d, 12 heads, 86.3 M parameters —
-  initialized **from scratch** (the architecture is borrowed, not the pretrained English weights).
-  Events are written as text numbers and tokenized with a BPE tokenizer retrained on that text
-  (vocabulary 587); context 256 tokens.
-- **Training:** original + transposed pieces (874 total), 20 epochs, effective batch 256 (16 × 16
-  gradient accumulation), learning rate 1e-4 with cosine decay, fp16, on a Colab GPU.
-- **Result:** the largest model and the only one trained with augmented data. It generates 2,048-event
-  pieces in 256-event chunks, each primed with the last 32 events. In the saved sample, later chunks
-  fall into short repeating loops — a common failure when each chunk sees so little context. Its
-  "validation" set is the first 100 training pieces, so it isn't a true held-out measure, and it
-  wasn't evaluated with the notebook's metrics.
+- **Architecture:** `GPT2LMHeadModel`, 12 layers, 768-d, 12 heads, 86.3 M parameters. Events are
+  written as text numbers, with a retrained BPE tokenizer (vocabulary 587); context 256 tokens.
+- **Training:** original + transposed pieces (874), 20 epochs, effective batch 256, learning rate
+  1e-4 with cosine decay, fp16, on a Colab GPU. It is the only model trained with augmented data.
+- **Inference:** ≈3–5 s per 600 events (estimated). It is the largest model, but Hugging Face caches
+  keys and values, so each new token costs the same.
+- **Result:** it writes 256-token chunks, each primed with the last 32 events, and later chunks fall
+  into short loops. Its "validation" set is training data, and it has no notebook metrics.
+- **Takeaway:** size doesn't make up for a short memory. Carrying only 32 events from one chunk to
+  the next is what lets it loop.
+
+### Latent-variable model
+
+#### 5.5 VAE — recurrent variational autoencoder
+
+- **Family:** latent-variable · recurrent · trained from scratch.
+- **Inspired by:** VAE (Kingma & Welling, 2014), the sentence VAE (Bowman et al., 2016) and Magenta's
+  **MusicVAE** (Roberts et al., 2018).
+- **Architecture:** a bidirectional 3-layer GRU encoder compresses a segment into a 64-d latent `z`,
+  and a 3-layer GRU decoder rebuilds it, with `z` fed in at every step.
+- **Training:** reconstruction + KL divergence (the ELBO), 50 epochs (3.2 h). The loss fell steadily,
+  which hid the collapse described below.
+- **Inference:** 0.13 s per 600 events, among the cheapest: only the GRU decoder runs, with the same
+  work for every event.
+- **Result:** the latent **collapsed**: KL is 1.07 nats across 64 dimensions, and `z = 0` scores the
+  same. So it acts as a second RNN (96.2% seen accuracy), and different `z` values give the same music.
+- **Takeaway:** a strong decoder learns to ignore the latent. KL annealing or word dropout are the
+  standard fixes.
+
+### Adversarial model
+
+#### 5.6 GAN — Transformer generator + Transformer discriminator
+
+- **Family:** adversarial · attention · **the only model that starts from trained weights.**
+- **Inspired by:** GAN (Goodfellow et al., 2014), **SeqGAN** (Yu et al., 2017), **ScratchGAN**
+  (de Masson d'Autume et al., 2019), **LeakGAN** (Guo et al., 2018) and Transformer-GAN (Muhamed, 2021).
+- **Architecture:** a generator and a discriminator, both copies of the trained Transformer. The
+  discriminator's head scores every event as real or generated.
+- **Training:** 600 iterations (35 min). Each runs a discriminator step, a REINFORCE step on per-event
+  rewards and a cross-entropy step on real data. The discriminator learns 10× slower.
+- **Inference:** 6.9 s per 600 events, the same as the Transformer, because it uses the same
+  `predict`. Its key-value cache speeds up only the training rollouts.
+- **Result:** raw sampling has ~20% fewer stuck notes than a plain fine-tune of the same length, and
+  more realistic variety (see Result details). By ear it is comparable to the Transformer.
+- **Takeaway:** pure adversarial training failed. On discrete sequences a GAN needs a strong starting
+  point, as in the published work.
+
+### Reinforcement-learning model
+
+#### 5.7 A2C — advantage actor-critic
+
+- **Family:** reinforcement learning · recurrent · trained from scratch.
+- **Inspired by:** **A3C / A2C** (Mnih et al., 2016), here set up as a contextual bandit: each step
+  is scored on its own (γ = 0).
+- **Architecture:** a 3-layer GRU shared by an *actor* (a policy over the 391 events) and a *critic*
+  (a value estimate).
+- **Training:** pure RL, 30 epochs (67 min): reward 1 only when the sampled event matches the real
+  next one, with the critic as a baseline. An entropy bonus of 0.05 prevents collapse.
+- **Inference:** 0.12 s per 600 events, among the cheapest: only the actor's GRU runs, the same cost
+  as the RNN.
+- **Result:** next-event accuracy rose from 0.5% to ~75% purely from reward, and `evaluate_net`
+  reached 17.2%, on par with the Transformer.
+- **Takeaway:** a right/wrong reward can train a language model, less efficiently than MLE. Its critic
+  predicts a fixed reward rule, while the GAN's discriminator competes.
+
+### Diffusion model
+
+#### 5.8 Diffusion — masked discrete diffusion
+
+- **Family:** diffusion · bidirectional attention · trained from scratch · **not left to right.**
+- **Inspired by:** DDPM (Ho et al., 2020), adapted to tokens by **D3PM** (2021), **MDLM** (Sahoo et al.,
+  2024) and **MaskGIT** (2022), with **Mask-Predict** / **ReMDM** for the correction rounds.
+- **Architecture:** the Transformer's decoder code without the causal mask, plus a `[MASK]` token that
+  also gives infilling. 8 layers, d_model 512, feed-forward 1024; 17.0 M parameters.
+- **Training:** hide a random fraction `t` of each segment and predict it (cross-entropy weighted by
+  `1/t`). AdamW 3e-4, 100 epochs (3.9 h). At the Transformer's size it was under-trained.
+- **Inference:** 14.3 s per 600 events, the most expensive: 100 reveal steps plus 300 correction
+  rounds, each a full pass over the piece (3.9 s without the rounds).
+- **Result:** `evaluate_net` 17.1%, level with the Transformer. Correction rounds halve broken note
+  pairs (see Result details), but ~9% of notes still drop. By ear it is below the Transformer.
+- **Takeaway:** events carry state (a running clock, the keys held down) that a fill-in-anywhere model
+  must guess early. Block diffusion (BD3-LM) would write small blocks left to right.
+
+### Result details
+
+**GAN**, raw sampling, against plain MLE fine-tuning of the same length:
+
+| | notes sounding at once | variety (distinct 4-grams) | accuracy |
+|---|---|---|---|
+| real music | ~2.9–3.0 | 0.72–0.74 | — |
+| Transformer, raw | 15.9 | 0.80 | 79.9% |
+| plain-CE fine-tune (control) | 4.9–5.0 | 0.75–0.77 | 79.9% |
+| **GAN** | **3.8–4.2** | **0.70–0.74** | 79.7% |
+
+Dropping label smoothing (the MLE step) does most of the fixing on its own. The GAN's own
+contribution is half the remaining gap to real music (single training run, two sampling seeds).
+
+**Diffusion**, 16 pieces of 600 events. Notes sounding at once are averaged over all time here, so
+real music scores 2.5 rather than ~3:
+
+| | notes/s | notes sounding at once | note-offs with no note-on |
+|---|---|---|---|
+| real music | 11.6 | 2.5 | 1.5 |
+| without correction rounds | 9.2 | 2.3 | 24.3 |
+| **with correction rounds** | **10.0** | **2.3** | **13.3** |
+
+A first version at the Transformer's size (256 × 6, 50 epochs) plateaued at loss 2.80 and wrote
+thinner music (6.4 notes/s, 30.6 broken pairs). None of the final model's generated 16-event
+stretches appear verbatim in the training set.
 
 ---
 
@@ -201,7 +289,13 @@ never trained on.
 3. **GANs on discrete sequences need a strong starting point.** Pure adversarial training did not
    work; a pretrained generator with a pretrained, slowed-down discriminator produced a real (if
    modest) improvement beyond plain MLE.
-4. **Measure what you hear.** Several defects — hanging notes, broken durations, an unused latent —
-   were invisible to accuracy and found only by checking decoded music against real statistics.
-5. **Known loose ends:** no held-out test set; the CNN's late-training degradation; and the VAE's
-   posterior collapse.
+4. **Measure what you hear.** Several defects — hanging notes, broken durations, an unused latent,
+   diffusion's unpaired note-offs — were invisible to accuracy and found only by checking decoded
+   music against real statistics.
+5. **The data representation favours some model families.** These events carry state: a running
+   clock and the keys held down. That suits models that write left to right. Diffusion reached
+   comparable accuracy only with 5× the parameters, twice the training and correction rounds at
+   generation time, and it still breaks more note pairs.
+6. **Known loose ends:** no held-out test set; the CNN's late-training degradation; the VAE's
+   posterior collapse; and diffusion's remaining note-pairing errors. Block diffusion is the next
+   step there, and the effect of correction rounds on variety hasn't been measured.

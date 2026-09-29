@@ -13,12 +13,13 @@ from app.model.transformer import TransformerDecoder, Transformer
 from app.model.vae import VAE
 from app.model.gan import Generator
 from app.model.a2c import A2C
+from app.model.diffusion import Diffusion
 from app.model.gpt2 import GPT2
 
 BASE_DIR = Path(__file__).resolve(strict=True).parent
 
 class GenerateRequest(BaseModel):
-    model: Literal['rnn', 'cnn', 'trf', 'vae', 'gan', 'a2c', 'gpt2']
+    model: Literal['rnn', 'cnn', 'trf', 'vae', 'gan', 'a2c', 'dif', 'gpt2']
     length: int
     prefix: List[int]
 
@@ -107,6 +108,19 @@ def load_a2c():
     a2c_net = A2C(vocab_size, embedding_dim, hidden_size, num_layers).to(device)
     load_model(a2c_net, f'{BASE_DIR}/checkpoint/a2c.pt')
     return a2c_net
+
+def load_dif():
+    vocab_size = 388+4
+    d_model = 512
+    ffn_l1_size = 1024
+    ffn_l2_size = d_model
+    num_heads = 8
+    num_layers = 8
+    dropout = 0.0
+    decoder = TransformerDecoder(vocab_size, d_model, ffn_l1_size, ffn_l2_size, num_heads, num_layers, dropout, device=device)
+    diffusion_net = Diffusion(decoder).to(device)
+    load_model(diffusion_net, f'{BASE_DIR}/checkpoint/diffusion.pt')
+    return diffusion_net
 
 def load_gpt2():
     return GPT2(f'{BASE_DIR}/checkpoint/gpt2', device)

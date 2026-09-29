@@ -13,8 +13,7 @@ generateButton.addEventListener("click", async (e) => {
   statusParagraph.innerText = "Loading...";
   midiPlayer.setAttribute("src", "data:,");
   downloadAnchor.setAttribute("href", "#");
-  // let url = "http://localhost/generate";
-  let url = "https://metoonhathung-music-generation-api-24psxym5la-uc.a.run.app/generate";
+  let url = "http://localhost/generate";
   let body = {
     method: "POST",
     mode: "cors",

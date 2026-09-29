@@ -2,8 +2,8 @@
 
 [Demo](https://metoonhathung-music-generation.streamlit.app/)
 
-Description: A Python application that generates ragtime piano music with seven deep-learning models
-trained from scratch: RNN, CNN (WaveNet), VAE, Transformer, GAN, A2C and GPT-2. See
+Description: A Python application that generates ragtime piano music with eight deep-learning models
+trained from scratch: RNN, CNN (WaveNet), VAE, Transformer, GAN, A2C, Diffusion, and GPT-2. See
 [REPORT.md](REPORT.md) for how each model works and how it trained.
 
 Technologies: PyTorch, FastAPI, Streamlit, Hugging Face
@@ -12,7 +12,7 @@ Technologies: PyTorch, FastAPI, Streamlit, Hugging Face
 
 | Path | What it is |
 |---|---|
-| `music_generation.ipynb` | Training for RNN, CNN, VAE, Transformer, GAN and A2C |
+| `music_generation.ipynb` | Training for RNN, CNN, VAE, Transformer, GAN, A2C, and Diffusion |
 | `huggingface_transformers.ipynb` | Training for GPT-2 |
 | `main.py`, `util.py` | Streamlit app (new stack) |
 | `app/` | FastAPI service and model code (old stack) |
@@ -29,7 +29,7 @@ pipenv shell
 
 ## Run the new stack (Streamlit)
 
-All seven models run inside the Streamlit app. Missing weights are downloaded from Hugging Face on first
+All eight models run inside the Streamlit app. Missing weights are downloaded from Hugging Face on first
 use; no API or API key is needed.
 
 ```
@@ -54,7 +54,7 @@ Open http://localhost:8501.
    python -m http.server 8765
    ```
 
-Or call the API directly (`model`: `rnn`, `cnn`, `trf`, `vae`, `gan`, `a2c` or `gpt2`):
+Or call the API directly (`model`: `rnn`, `cnn`, `trf`, `vae`, `gan`, `a2c`, `dif`, or `gpt2`):
 
 ```
 curl -X POST http://localhost/generate -H "X-API-Key: your-api-key" -H "Content-Type: application/json" -d '{"model": "trf", "length": 600, "prefix": [1]}' -o output.midi
@@ -84,14 +84,10 @@ After retraining, save half-precision copies to `app/checkpoint/` and upload the
 
 ```
 hf auth login
-hf upload metoonhathung/music-generation-models app/checkpoint . --include rnn.pt cnn.pt transformer.pt vae.pt generator.pt a2c.pt "gpt2/*"
+hf upload metoonhathung/music-generation-models app/checkpoint . --include rnn.pt cnn.pt transformer.pt vae.pt generator.pt a2c.pt diffusion.pt "gpt2/*"
 ```
 
 ## Observability
-
-[Docker Hub](https://hub.docker.com/r/metoonhathung/music-generation)
-
-[Google Cloud](https://console.cloud.google.com/run/detail/us-central1/metoonhathung-music-generation-api/metrics?inv=1&invt=Ab4zGQ&project=music-generation-366602)
 
 [Hugging Face (GPT-2 training)](https://huggingface.co/metoonhathung/music-generation)
 

@@ -5,7 +5,7 @@ from huggingface_hub import snapshot_download
 from app import util
 
 HF_REPO = "metoonhathung/music-generation-models"
-CHECKPOINTS = {"rnn": "rnn.pt", "cnn": "cnn.pt", "trf": "transformer.pt", "vae": "vae.pt", "gan": "generator.pt", "a2c": "a2c.pt", "gpt2": "gpt2"}
+CHECKPOINTS = {"rnn": "rnn.pt", "cnn": "cnn.pt", "trf": "transformer.pt", "vae": "vae.pt", "gan": "generator.pt", "a2c": "a2c.pt", "dif": "diffusion.pt", "gpt2": "gpt2"}
 
 @lru_cache(maxsize=None)
 def get_model(model):
