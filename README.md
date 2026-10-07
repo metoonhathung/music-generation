@@ -3,8 +3,9 @@
 [Demo](https://metoonhathung-music-generation.streamlit.app/)
 
 Description: A Python application that generates ragtime piano music with eight deep-learning models
-trained from scratch: RNN, CNN (WaveNet), VAE, Transformer, GAN, A2C, Diffusion, and GPT-2. See
-[REPORT.md](REPORT.md) for how each model works and how it trained.
+trained from scratch: RNN, CNN (WaveNet), VAE, Transformer, GAN, A2C, Diffusion, and GPT-2, plus an
+experiment that has a frontier LLM (Claude Opus 5.5) compose with no training. See [REPORT.md](REPORT.md)
+for how each model works and how it trained.
 
 Technologies: PyTorch, FastAPI, Streamlit, Hugging Face
 
@@ -12,12 +13,14 @@ Technologies: PyTorch, FastAPI, Streamlit, Hugging Face
 
 | Path | What it is |
 |---|---|
-| `music_generation.ipynb` | Training for RNN, CNN, VAE, Transformer, GAN, A2C, and Diffusion |
+| `music_generation.ipynb` | Training for RNN, CNN, VAE, Transformer, GAN, A2C, and Diffusion; the LLM experiment; half-precision export |
 | `huggingface_transformers.ipynb` | Training for GPT-2 |
 | `main.py`, `util.py` | Streamlit app (new stack) |
 | `app/` | FastAPI service and model code (old stack) |
 | `index.html`, `script.js` | Web page for the FastAPI service (old stack) |
 | `checkpoint/` | Full training checkpoints, for resuming training (local only) |
+| `dataset/` | The scraped MIDI files and their encoded cache (local only) |
+| `output/` | Generated `.midi` files from the notebooks (local only) |
 | `app/checkpoint/` | Half-precision checkpoints the apps serve, hosted on [Hugging Face](https://huggingface.co/metoonhathung/music-generation-models) |
 
 ## Setup
@@ -26,6 +29,18 @@ Technologies: PyTorch, FastAPI, Streamlit, Hugging Face
 pipenv install
 pipenv shell
 ```
+
+## Run the notebooks
+
+The notebooks need a few packages that the apps don't, so install them into the same environment:
+
+```
+pip install ipykernel matplotlib beautifulsoup4 requests music21 anthropic
+```
+
+Then open `music_generation.ipynb` and select the pipenv environment as its kernel. The LLM section
+calls the Anthropic API, which costs about $0.4–0.8 per piece. Set `ANTHROPIC_API_KEY` in the shell
+that starts the editor, and never put the key in the notebook.
 
 ## Run the new stack (Streamlit)
 
@@ -80,7 +95,8 @@ docker push metoonhathung/music-generation:latest
 
 ## Update the hosted models
 
-After retraining, save half-precision copies to `app/checkpoint/` and upload them:
+After retraining, run the "Half precision" section at the end of `music_generation.ipynb` to save
+half-precision copies to `app/checkpoint/`. Then upload them:
 
 ```
 hf auth login
