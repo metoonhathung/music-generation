@@ -1,0 +1,13 @@
+# Allowlist: the image only needs what the Dockerfile copies.
+*
+!Pipfile
+!Pipfile.lock
+!app
+
+# Never ship secrets, wherever they are (the .env.example templates are fine).
+**/.env
+
+# Clutter inside app/
+**/__pycache__
+**/.DS_Store
+**/.cache

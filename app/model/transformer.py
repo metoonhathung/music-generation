@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from app.model import device, pad_token
+from app.model import pad_token
 
 def masked_softmax(X, valid_length):
   """
@@ -9,7 +9,7 @@ def masked_softmax(X, valid_length):
     X: 3-D tensor
     valid_length: 1-D or 2-D tensor
   """
-  mask_value = -1e7 
+  mask_value = -1e7
 
   if len(X.shape) == 2:
     X = X.unsqueeze(1)
@@ -26,12 +26,18 @@ def masked_softmax(X, valid_length):
 
   Y = torch.softmax(X, dim=-1)
 
-  
+
   return Y
 
-class DotProductAttention(nn.Module): 
-  def __init__(self):
+# FAST_ATTENTION computes exactly the masked softmax below (same mask, same dropout) with PyTorch's
+# fused kernel: 2-4x faster, and it never materialises the (B*heads, T, T) score tensor. Set it to
+# False to step through the explicit maths.
+FAST_ATTENTION = True
+
+class DotProductAttention(nn.Module):
+  def __init__(self, dropout):
       super(DotProductAttention, self).__init__()
+      self.dropout = nn.Dropout(dropout)
 
   def forward(self, query, key, value, valid_length=None):
     """
@@ -39,7 +45,7 @@ class DotProductAttention(nn.Module):
       query: tensor of size (B, n, d)
       key: tensor of size (B, m, d)
       value: tensor of size (B, m, dim_v)
-      valid_length: (B, )
+      valid_length: (B, ) or (B, n)
 
       B is the batch_size, n is the number of queries, m is the number of <key, value> pairs,
       d is the feature dimension of the query, and dim_v is the feature dimension of the value.
@@ -47,28 +53,35 @@ class DotProductAttention(nn.Module):
     Outputs:
       attention: tensor of size (B, n, dim_v), weighted sum of values
     """
+    if FAST_ATTENTION:
+      lens = valid_length if valid_length.dim() == 2 else valid_length[:, None]
+      mask = torch.arange(key.shape[1], device=key.device) < lens[..., None]
+      return F.scaled_dot_product_attention(query, key, value, attn_mask=mask,
+                                            dropout_p=self.dropout.p if self.training else 0)
+
     d = key.shape[2]
     a = torch.bmm(query, key.permute(0,2,1))/(d ** 0.5)
     b = masked_softmax(a, valid_length)
-    attention = torch.bmm(b, value)
+    attention = torch.bmm(self.dropout(b), value)
 
     return attention
 
 class MultiHeadAttention(nn.Module):
-  def __init__(self, d_model, d_k, num_heads,  **kwargs):
+  def __init__(self, d_model, d_k, num_heads, dropout, **kwargs):
     super(MultiHeadAttention, self).__init__()
     """
     Inputs:
       d_model: int, the same d_model in paper, feature dimension of query/key/values
       d_k: int, feature projected dimension of query/key/value, we follow the setting in the paper, where d_v=d_k=d_q
       num_heads: int, number of heads used for this MultiHeadAttention
+      dropout: dropout probability for the attention weights
     """
     self.num_heads = num_heads
-    self.attention = DotProductAttention()
-    self.W_q = nn.Linear(d_model, num_heads * d_k)
-    self.W_k = nn.Linear(d_model, num_heads * d_k)
-    self.W_v = nn.Linear(d_model, num_heads * d_k)
-    self.W_o = nn.Linear(num_heads * d_k, d_model)
+    self.attention = DotProductAttention(dropout)
+    self.W_q = nn.Linear(d_model, num_heads * d_k, bias=False)
+    self.W_k = nn.Linear(d_model, num_heads * d_k, bias=False)
+    self.W_v = nn.Linear(d_model, num_heads * d_k, bias=False)
+    self.W_o = nn.Linear(num_heads * d_k, d_model, bias=False)
 
   def forward(self, query, key, value, valid_length):
     """
@@ -137,29 +150,33 @@ class PositionWiseFFN(nn.Module):
     return o
 
 class PositionalEncoding(nn.Module):
-  def __init__(self, dim, device, max_len=100000):
+  def __init__(self, dim, dropout, device, max_len=2048):
     super(PositionalEncoding, self).__init__()
     """
     Inputs:
       dim: feature dimension of the positional encoding
+      dropout: dropout probability, applied after adding the encoding
     """
+    self.dropout = nn.Dropout(dropout)
     self.pe = torch.zeros((1, max_len, dim), device=device)
     X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / torch.pow(10000, torch.arange(0, dim, 2, dtype=torch.float32) / dim)
     self.pe[:, :, 0::2] = torch.sin(X)
     self.pe[:, :, 1::2] = torch.cos(X)
 
 
-  def forward(self, X):
+  def forward(self, X, offset=0):
     """
     Inputs:
       X: tensor of size (N, T, D_in)
+      offset: position of X's first step. During generation it is the number of steps already
+        cached; d2l always starts at row 0, which would give every generated event position 0.
     Output:
       Y: tensor of the same size of X
     """
     N, T, D_in = X.shape
-    Y = X + self.pe[:, :T, :]
+    Y = X + self.pe[:, offset:offset+T, :]
 
-    return Y
+    return self.dropout(Y)
 
 class AddNorm(nn.Module):
     def __init__(self, dropout, embedding_size):
@@ -182,32 +199,31 @@ class DecoderBlock(nn.Module):
       fnn_l2_size: int, feature dimension of the output after the second position-wise FFN.
       num_heads: int, number of head for multi-head attention layer.
       dropout: dropout probability for dropout layer.
-      
+
     """
-    self.attention = MultiHeadAttention(d_model, d_k, num_heads)
+    self.attention = MultiHeadAttention(d_model, d_k, num_heads, dropout)
     self.addnorm_1 = AddNorm(dropout, d_model)
     self.ffn = PositionWiseFFN(d_model, ffn_l1_size, ffn_l2_size)
     self.addnorm_2 = AddNorm(dropout, d_model)
 
-  def forward(self, X, valid_len):
+  def forward(self, X, state):
     """
     Inputs:
       X: tensor of size (N, T, D), embedded input sequences
-      **kwargs: other arguments you think is necessary for implementation
+      state: this block's inputs from earlier generation steps (d2l's key_values cache), or None
     Outputs:
-      Y: tensor of size (N, T, D_out)
-      
-      Feel free to output variables if necessary.
+      Y: tensor of size (N, T, D_out), and the updated state
     """
     N, T, D = X.shape
-    if self.training:
-      dec_valid_len = torch.arange(1, T+1).repeat(N, 1).to(device)
-    else:
-      dec_valid_len = torch.full((N,), T).to(device)
-    X = self.addnorm_1(X, self.attention(X, X, X, dec_valid_len))
+    key_values = X if state is None else torch.cat((state, X), dim=1)
+    # Query i sits at position offset + i and attends keys 0..offset+i. Without a cache this is d2l's
+    # causal arange(1, T+1); for one new event it is every cached key, as d2l's None.
+    offset = key_values.shape[1] - T
+    dec_valid_len = torch.arange(offset + 1, offset + T + 1, device=X.device).repeat(N, 1)
+    X = self.addnorm_1(X, self.attention(X, key_values, key_values, dec_valid_len))
     Y = self.addnorm_2(X, self.ffn(X))
 
-    return Y
+    return Y, key_values
 
 class TransformerDecoder(nn.Module):
   def __init__(self, vocab_size, d_model, ffn_l1_size, ffn_l2_size,
@@ -224,23 +240,29 @@ class TransformerDecoder(nn.Module):
     """
     self.d_model = d_model
     self.embedding = nn.Embedding(vocab_size, d_model)
-    self.pos_enc = PositionalEncoding(d_model, device=device)
+    self.pos_enc = PositionalEncoding(d_model, dropout, device=device)
     self.layers = nn.ModuleList([DecoderBlock(d_model, d_model // num_heads, ffn_l1_size, ffn_l2_size, num_heads, dropout) for _ in range(num_layers)])
     self.dense = nn.Linear(d_model, vocab_size)
 
+  def init_state(self):
+    return [None] * len(self.layers)
 
-  def forward(self, X, valid_len):
+  def forward(self, X, state=None):
     """
     Inputs:
-      X: tensor of size (N, T, D), embedded input sequences
-      valid_length: tensor of size (N,), valid lengths for each sequence
+      X: tensor of size (N, T), input tokens
+      state: the blocks' caches from init_state() or an earlier call, or None for a new sequence
+    Outputs:
+      Y: tensor of size (N, T, vocab_size), and the updated state
     """
-    X = self.pos_enc(self.embedding(X) * (self.d_model ** 0.5))
-    for layer in self.layers:
-      X = layer(X, valid_len)
+    state = self.init_state() if state is None else state
+    offset = 0 if state[0] is None else state[0].shape[1]
+    X = self.pos_enc(self.embedding(X) * (self.d_model ** 0.5), offset)
+    for i, layer in enumerate(self.layers):
+      X, state[i] = layer(X, state[i])
     Y = self.dense(X)
-    
-    return Y
+
+    return Y, state
 
 class Transformer(nn.Module):
   """The base class for the encoder-decoder architecture."""
@@ -250,32 +272,31 @@ class Transformer(nn.Module):
 
   def forward(self, tgt_array, tgt_valid_len):
     """Forward function"""
-    loss = 0
+    preds, _ = self.decoder(tgt_array)
 
-    preds = self.decoder(tgt_array, tgt_valid_len)
-
-    T = tgt_array.shape[1]
-    
-    for t in range(T-1):
-      loss += F.nll_loss(F.log_softmax(preds[:, t]), tgt_array[:, t+1], ignore_index=pad_token)
+    # d2l's masked cross-entropy: the mean over every next event that isn't padding
+    loss = F.cross_entropy(preds[:, :-1].reshape(-1, preds.shape[-1]), tgt_array[:, 1:].reshape(-1),
+                           ignore_index=pad_token)
 
     preds = preds.argmax(dim=-1)
-    
+
     return loss, preds
-        
+
+  @torch.no_grad()
   def predict(self, tgt_array, tgt_valid_len):
     N, T = tgt_array.shape
 
-    inputs = tgt_array[:, :1]
+    state = self.decoder.init_state()
     outputs = [tgt_array[:, :1]]
 
     for t in range(torch.max(tgt_valid_len)-1):
-      o = self.decoder(inputs, tgt_valid_len)
+      # d2l's predict_step: feed only the newest event; the earlier ones are cached in state
+      o, state = self.decoder(outputs[-1], state)
       if t+1 < T:
         output = tgt_array[:, t+1:t+2]
       else:
-        output = o[:,-1:].argmax(dim=-1)
+        # sample from the model's distribution; d2l's greedy argmax loops on the same few notes
+        output = torch.multinomial(F.softmax(o[:, -1], dim=-1), 1)
       outputs.append(output)
-      inputs = torch.cat(outputs, dim=1)
-      
-    return inputs[:, 1:]
+
+    return torch.cat(outputs, dim=1)[:, 1:]

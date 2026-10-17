@@ -1,6 +1,7 @@
 const modelSelect = document.querySelector("#model");
 const lengthInput = document.querySelector("#length");
 const prefixInput = document.querySelector("#prefix");
+const apiKeyInput = document.querySelector("#apikey");
 const generateButton = document.querySelector("#generate");
 const statusParagraph = document.querySelector("#status");
 const midiPlayer = document.querySelector("#midi");
@@ -19,6 +20,7 @@ generateButton.addEventListener("click", async (e) => {
     headers: {
       "Content-Type": "application/json",
       Accept: "audio/midi",
+      "X-API-Key": apiKeyInput.value,
     },
     body: JSON.stringify({
       model: modelSelect.value,
